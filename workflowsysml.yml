@@ -1,0 +1,136 @@
+image: docker:latest
+
+services:
+  - name: docker:dind
+    command: ["--registry-mirror", "https://docker-proxy.industrysoftware.automation.siemens.com"]
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_AUTH_CONFIG: $DOCKER_AUTH_CONFIG
+  GITLAB_REGISTRY: "gitlab.industrysoftware.automation.siemens.com:4567"
+  GIT_USERNAME: $GIT_USERNAME
+  GIT_TOKEN: $GIT_TOKEN
+
+  # Public GitLab SSH keys
+  SSH_PRIVATE_KEY_GITLAB_BASE64: $SSH_PRIVATE_KEY_GITLAB_BASE64
+  KNOWN_HOSTS_GITLAB: $KNOWN_HOSTS_GITLAB
+
+  CD_REPO_USER_NAME: $CD_REPO_USER_NAME
+  CD_REPO_USER_EMAIL: $CD_REPO_USER_EMAIL
+
+stages:
+  - prepare
+  - build
+  - helm-update
+  - argocd-sync
+
+prepare:
+  stage: prepare
+  image: harbor.xcr.svcs01.prod.wv.kaas.sws.siemens.com/mbse/as_build_tools:1.2.0-ubuntu
+  script:
+    - if [ -z "$BUILD_ENV" ]; then echo "BUILD_ENV is not set"; exit 1; fi
+    - java -version
+    - docker --version
+    - mvn --version
+  tags:
+    - docker
+
+build:
+  stage: build
+  image: harbor.xcr.svcs01.prod.wv.kaas.sws.siemens.com/mbse/as_build_tools:1.2.0-ubuntu
+  script:
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+
+    # Add known hosts
+    - echo "$KNOWN_HOSTS_GITLAB" >> ~/.ssh/known_hosts
+
+    # Configure SSH for GitLab
+    - echo "$SSH_PRIVATE_KEY_GITLAB_BASE64" | base64 -d > ~/.ssh/id_rsa_gitlab
+    - chmod 400 ~/.ssh/id_rsa_gitlab
+
+    - echo -e "Host gitlab.industrysoftware.automation.siemens.com\n\tHostName gitlab.industrysoftware.automation.siemens.com\n\tIdentityFile ~/.ssh/id_rsa_gitlab\n" > ~/.ssh/config
+    - chmod 400 ~/.ssh/config
+
+    # Export Docker credentials
+    - export DOCKER_CREDS_gitlab_industrysoftware_automation_siemens_com_4567=$GIT_USERNAME:$GIT_TOKEN
+    - export DOCKER_CREDS_harbor_xcr_svcs01_prod_wv_kaas_sws_siemens_com=$HARBOR_USERNAME:$HARBOR_TOKEN
+    - export DOCKER_CREDS_harbor_xcr_svcs01_prod_us_east_1_kaas_sws_siemens_com_mbse=$PROD_HARBOR_USERNAME:$PROD_HARBOR_TOKEN
+
+    # Run Docker build
+    - echo "Running Docker build..."
+    - docker build -t my-image:latest .
+  tags:
+    - docker
+
+helm:
+  stage: helm-update
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git openssh
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo "$KNOWN_HOSTS_GITLAB" > ~/.ssh/known_hosts
+    - echo "$SSH_PRIVATE_KEY_GITLAB_BASE64" | base64 -d > ~/.ssh/id_rsa_gitlab
+    - chmod 400 ~/.ssh/id_rsa_gitlab
+    - echo -e "Host gitlab.industrysoftware.automation.siemens.com\n\tHostName gitlab.industrysoftware.automation.siemens.com\n\tIdentityFile ~/.ssh/id_rsa_gitlab\n" > ~/.ssh/config
+    - chmod 400 ~/.ssh/config
+    - cat ~/.ssh/id_rsa_gitlab
+    - cat ~/.ssh/config
+    - git config --global user.name "$CD_REPO_USER_NAME"
+    - git config --global user.email "$CD_REPO_USER_EMAIL"
+  script:
+    - if [ "$BUILD_ENV" == "non-prod" ]; then
+        echo "Deploying to non-prod...";
+        git clone git@gitlab.industrysoftware.automation.siemens.com:gitops/mbse.git;
+        cd mbse/kubernetes/mbse/disw-repo;
+        echo $TAG;
+        git checkout -b update-tag-$TAG;
+        sed -i "s|tag:.*|tag:\ ${TAG}|" values.yaml;
+        git add .;
+        git commit -m "Update image tag to $TAG";
+        git push origin update-tag-$TAG;
+        git checkout main;
+        git pull origin main;
+        git merge --no-ff update-tag-$TAG;
+        git push origin main;
+      elif [ "$BUILD_ENV" == "prod" ]; then
+        echo "Deploying to prod...";
+        git clone git@gitlab.industrysoftware.automation.siemens.com:gitops/mbse.git;
+        cd mbse/kubernetes/mbse-prod/disw-repo;
+        echo $TAG;
+        git checkout -b update-tag-$TAG;
+        sed -i "s|tag:.*|tag:\ ${TAG}|" values.yaml;
+        git add .;
+        git commit -m "Update image tag to $TAG";
+        git push origin update-tag-$TAG;
+        git checkout main;
+        git pull origin main;
+        git merge --no-ff update-tag-$TAG;
+        git push origin main;
+      else
+        echo "Unknown deployment environment:\ $BUILD_ENV";
+        exit 1;
+      fi
+  tags:
+    - docker
+    - linux
+  rules:
+    - if: '$BUILD_ENV == "non-prod" || $BUILD_ENV == "prod"'
+
+argocd:
+  stage: argocd-sync
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq  
+  script:
+    - echo "Please ensure the ArgoCD application is synchronized and healthy."
+    - echo "Login to https://argocd.xcr.svcs01.prod.wv.kaas.sws.siemens.com"
+    - echo "Verify application status in the ArgoCD dashboard."
+    - echo "Once confirmed, proceed with this manual job."
+  when: manual
+  allow_failure: false
+  tags:
+    - docker
+  rules:
+    - if: '$BUILD_ENV == "non-prod"'
