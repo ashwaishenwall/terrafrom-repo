@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: partservices-ui-dev
+    namespace: oat-dev
+spec:
+    replicas: 2
+    selector:
+        matchLabels:
+            app: partservices-ui-dev
+    template:
+        metadata:
+            labels:
+                app: partservices-ui-dev
+        spec:
+            imagePullSecrets:
+                - name: oatharborrobot
+            containers:
+                - name: partservices-ui-dev
+                  # renovate: datasource=gitlab-tags depName=xst-public/partservices-ui versioning=semver registryUrl=https://gitlab.industrysoftware.automation.siemens.com
+                  image: harbor.xcr.svcs01.prod.wv.kaas.sws.siemens.com/oat/partservices-ui:master
+                  ports:
+                      - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: partservices-ui
+    namespace: oat-dev
+spec:
+    selector:
+        app: partservices-ui-dev
+    ipFamilies:
+        - IPv4
+    ipFamilyPolicy: SingleStack
+    ports:
+        - name: http
+          port: 3000
+          protocol: TCP
+          targetPort: 3000
+    sessionAffinity: None
+    type: ClusterIP

@@ -1,0 +1,54 @@
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+    annotations:
+        # use letsencrypt to get a public certficate
+        cert-manager.io/cluster-issuer: letsencrypt
+        kubernetes.io/tls-acme: "true"
+        # change to match the onboarding DNS.
+        rancher.io/globalDNS.hostname: "*.oat.prod01.prod.wv.kaas.sws.siemens.com"
+
+        # Enable CORS.  These values are a bit more restrictive than the NGINX defaults.
+        nginx.ingress.kubernetes.io/enable-cors: "true"
+        nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+        nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS, HEAD"
+        nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Origin, X-Requested-With, Content-Type, Accept"
+        nginx.ingress.kubernetes.io/proxy-body-size: "0"
+        # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+        # nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+        nginx.ingress.kubernetes.io/allow-http: "false"
+    # can be changed
+    name: partservices-ui-dev
+spec:
+    ingressClassName: nginx
+    rules:
+        # change to match the onboarding DNS
+        - host: partservices-ui-dev.oat.prod01.prod.wv.kaas.sws.siemens.com
+          http:
+              paths:
+                  - backend:
+                        service:
+                            # must match the service name
+                            name: partservices-ui-dev
+                            port:
+                                number: 3000
+                    path: /
+                    pathType: Prefix
+        - host: partservices-ui-dev-agent.oat.prod01.prod.wv.kaas.sws.siemens.com
+          http:
+              paths:
+                  - backend:
+                        service:
+                            # must match the service name
+                            name: partservices-ui-dev
+                            port:
+                                number: 3000
+                    path: /
+                    pathType: Prefix
+    tls:
+        - hosts:
+              - partservices-ui-dev.oat.prod01.prod.wv.kaas.sws.siemens.com
+              - partservices-ui-dev-agents.oat.prod01.prod.wv.kaas.sws.siemens.com
+          secretName: partservices-ui-dev
