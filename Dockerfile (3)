@@ -1,0 +1,25 @@
+# Stage 1: Build the application using Maven
+FROM maven:3.8.4-openjdk-17-slim AS build
+
+WORKDIR /app
+
+# Copy the pom.xml and the source code
+COPY pom.xml .
+COPY src ./src
+
+# Build the application (without running tests)
+RUN mvn clean package -DskipTests
+
+# Stage 2: Create the final image with OpenJDK
+FROM openjdk:17-slim AS stage-1
+
+WORKDIR /app
+
+# Copy the built JAR file from the previous stage (build)
+COPY --from=build /app/target/tc-workflow-microservice-1.0.jar .
+ 
+# Expose the application port
+EXPOSE 8443
+ 
+# Set the command to run the application
+CMD ["java", "-Dspring.profiles.active=nonprod", "-jar", "tc-workflow-microservice-1.0.jar"]

@@ -1,0 +1,68 @@
+stages:
+  - cpipe/preprocess
+  - cpipe/preflight
+  - cpipe/lint
+  - cpipe/build
+  - cpipe/sign
+  - cpipe/scan
+  - cpipe/validate_CIS
+  - cpipe/publish
+  - cpipe/tag
+  - version
+  - release
+  - deploy
+
+include:
+  - project: 'chimera/container-pipeline'
+    ref: v1.0.3
+    file: '/templates/default.yaml'
+
+  - component: $CI_SERVER_FQDN/DevOps/cde/templates-examples/cde-components/automatic-versioning@v1.1.9
+    inputs:
+      enable_auto_versioning: true
+      enable_gitlab_release: false
+      branch_regex: master
+
+variables:
+  CPIPE_DOCKERFILE: Dockerfile
+  CONTAINER_REG_HARBOROP_HOST: https://harbor.xcr.svcs01.prod.wv.kaas.sws.siemens.com/
+  CONTAINER_REG_HARBOROP_USER: robot$$oat+cicd
+  CONTAINER_DEST_HARBOROP_PATH: harbor.xcr.svcs01.prod.wv.kaas.sws.siemens.com/oat/workflowapp
+  DOCKER_IMAGE: "$CI_REGISTRY_IMAGE/tc-workflow-microservice"
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+  CPIPE_REGISTER: true
+
+# Maven build
+maven-build:
+  stage: cpipe/build
+  image: maven:3.8.4-openjdk-17-slim
+  script:
+    - mvn clean package -DskipTests
+  artifacts:
+    paths:
+      - target/*.jar
+
+# Docker build
+dockerize:
+  stage: cpipe/build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - docker build -t "$DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - docker tag "$DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA" "$DOCKER_IMAGE:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "dev"'
+
+# Docker push
+push:
+  stage: cpipe/publish
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker push "$DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$DOCKER_IMAGE:latest"
